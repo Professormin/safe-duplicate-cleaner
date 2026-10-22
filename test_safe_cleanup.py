@@ -14,7 +14,7 @@ import threading
 from contextlib import redirect_stdout
 
 HERE = Path(__file__).resolve().parent
-spec = importlib.util.spec_from_file_location('cleaner', HERE / '两级重复文件安全清理.py')
+spec = importlib.util.spec_from_file_location('cleaner', HERE / 'safe_duplicate_cleaner.py')
 c = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(c)
 SESSION = HERE / '模拟测试目录' / uuid.uuid4().hex
@@ -185,7 +185,7 @@ class SafetyTests(unittest.TestCase):
 
     def test_double_click_defaults_to_script_folder(self):
         self.put('a'); self.put('b')
-        script = self.root / '两级重复文件安全清理.py'
+        script = self.root / 'safe_duplicate_cleaner.py'
         script.write_bytes((HERE / script.name).read_bytes())
         result = subprocess.run([sys.executable, str(script)], cwd=self.case,
                                 input=b'\n', capture_output=True)
@@ -318,7 +318,7 @@ def stop(event,*args):
     if event=='after_rename': os._exit(73)
 c.execute(c.plan(Path(sys.argv[2])),Path(sys.argv[3]),True,stop)
 '''
-        result = subprocess.run([sys.executable, '-c', script, str(HERE / '两级重复文件安全清理.py'), str(self.root), str(self.out)], capture_output=True)
+        result = subprocess.run([sys.executable, '-c', script, str(HERE / 'safe_duplicate_cleaner.py'), str(self.root), str(self.out)], capture_output=True)
         self.assertEqual(result.returncode, 73, result.stderr)
         rows = c.audit(next(self.out.glob('*.jsonl')))
         self.assertTrue(rows[0]['destination_exists'])
