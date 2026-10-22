@@ -9,6 +9,7 @@ import uuid
 import subprocess
 import sys
 import io
+import csv
 import threading
 from contextlib import redirect_stdout
 
@@ -255,6 +256,43 @@ class SafetyTests(unittest.TestCase):
                 self.assertTrue(notified.wait(4), '等待磁盘期间应持续输出')
         self.assertIn('slow_file', stream.getvalue())
         self.assertIn('累计读取', stream.getvalue())
+
+    def test_unique_sizes_are_not_read_for_hashing(self):
+        self.put('unique_big', b'x' * 10001)
+        self.put('a', b'abc'); self.put('b', b'abc')
+        with patch.object(c, 'read_file', wraps=c.read_file) as reader:
+            p = c.plan(self.root)
+        self.assertEqual({call.args[0].name for call in reader.call_args_list}, {'a', 'b'})
+        self.assertEqual(p['scan_bytes'], 10007)
+        self.assertEqual(len(p['jobs']), 1)
+
+    def test_unhashed_member_prevents_complete_folder_match(self):
+        self.put('A/f', b'abc'); self.put('B/f', b'abc')
+        self.put('A/unique', b'12345'); self.put('B/unique', b'123456')
+        self.assertEqual(c.plan(self.root)['jobs'], [])
+
+    def test_extension_filter_never_moves_excluded_members(self):
+        self.put('A/f.TXT', b'abc'); self.put('B/f.TXT', b'abc')
+        self.put('A/f.bin', b'xyz'); self.put('B/f.bin', b'xyz')
+        self.put('Loose/a.TXT', b'12345'); self.put('Loose/b.txt', b'12345')
+        with patch.object(c, 'EXTENSIONS', ('.txt',)):
+            p = c.plan(self.root)
+        self.assertEqual(len(p['jobs']), 1)
+        self.assertEqual(p['jobs'][0]['source'], 'Loose/b.txt')
+        self.run_plan(p)
+        self.assertTrue((self.root / 'A/f.bin').exists())
+        self.assertTrue((self.root / 'B/f.bin').exists())
+
+    def test_csv_report_preserves_paths_size_and_status(self):
+        self.put('a'); self.put('b')
+        report = self.run_plan(apply=False).with_suffix('.csv')
+        self.assertTrue(report.read_bytes().startswith(b'\xef\xbb\xbf'))
+        with report.open(encoding='utf-8-sig', newline='') as stream:
+            rows = list(csv.DictReader(stream))
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]['文件大小_字节'], '3')
+        self.assertEqual(rows[0]['处理状态'], '预览')
+        self.assertEqual(Path(rows[0]['重复项原始路径']), self.root / 'b')
 
     def test_new_subdirectory_blocks_loose_cleanup(self):
         self.put('a'); self.put('b'); p = c.plan(self.root)
