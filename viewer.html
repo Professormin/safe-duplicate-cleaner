@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Safe Duplicate Cleaner · 可视化报告查看器</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card-bg: #1e293b;
+      --border: #334155;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --primary: #38bdf8;
+      --primary-hover: #0284c7;
+      --success: #34d399;
+      --warning: #fbbf24;
+      --danger: #f87171;
+      --folder-color: #f59e0b;
+      --file-color: #38bdf8;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      padding: 24px;
+    }
+
+    .container {
+      max-width: 1280px;
+      margin: 0 auto;
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    h1 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .badge {
+      background: rgba(56, 189, 248, 0.1);
+      color: var(--primary);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      padding: 2px 10px;
+      border-radius: 999px;
+      font-size: 0.8rem;
+    }
+
+    /* 拖拽上传区 */
+    .drop-zone {
+      border: 2px dashed var(--border);
+      border-radius: 12px;
+      padding: 40px 20px;
+      text-align: center;
+      background: var(--card-bg);
+      cursor: pointer;
+      transition: all 0.2s ease;
+      margin-bottom: 24px;
+    }
+
+    .drop-zone:hover, .drop-zone.dragover {
+      border-color: var(--primary);
+      background: rgba(30, 41, 59, 0.8);
+    }
+
+    .drop-icon {
+      font-size: 2.5rem;
+      margin-bottom: 8px;
+    }
+
+    /* 统计面板 */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .stat-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+    }
+
+    .stat-label {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+    }
+
+    .stat-value {
+      font-size: 1.6rem;
+      font-weight: 700;
+    }
+
+    /* 搜索与筛选 */
+    .controls {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+
+    .search-input, .select-input {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 8px 14px;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      outline: none;
+    }
+
+    .search-input {
+      flex: 1;
+      min-width: 240px;
+    }
+
+    .search-input:focus, .select-input:focus {
+      border-color: var(--primary);
+    }
+
+    /* 结果列表 */
+    .job-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .job-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      transition: border-color 0.2s;
+    }
+
+    .job-card:hover {
+      border-color: rgba(56, 189, 248, 0.5);
+    }
+
+    .job-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 12px;
+      font-size: 0.9rem;
+    }
+
+    .type-tag {
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+
+    .type-folder {
+      background: rgba(245, 158, 11, 0.15);
+      color: var(--folder-color);
+    }
+
+    .type-file {
+      background: rgba(56, 189, 248, 0.15);
+      color: var(--file-color);
+    }
+
+    .status-tag {
+      margin-left: auto;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+
+    .compare-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    @media (max-width: 768px) {
+      .compare-grid { grid-template-columns: 1fr; }
+    }
+
+    .compare-box {
+      background: rgba(15, 23, 42, 0.5);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px;
+    }
+
+    .box-title {
+      font-size: 0.8rem;
+      font-weight: 600;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .keeper-title { color: var(--success); }
+    .isolate-title { color: var(--warning); }
+
+    .path-text {
+      font-family: monospace;
+      font-size: 0.85rem;
+      word-break: break-all;
+      color: #e2e8f0;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 40px;
+      color: var(--text-muted);
+    }
+
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🛡️ Safe Duplicate Cleaner <span class="badge">可视化报告查看器</span></h1>
+    </header>
+
+    <!-- 拖拽上传 -->
+    <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+      <div class="drop-icon">📄</div>
+      <div style="font-weight: 600; font-size: 1.1rem;">点击或拖拽 JSON 报告文件至此处</div>
+      <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 4px;">支持清理工具生成的 `清理报告_xxx.json` 文件</div>
+      <input type="file" id="fileInput" accept=".json" style="display: none;" onchange="handleFileSelect(event)">
+    </div>
+
+    <!-- 报告内容面板 (默认隐藏) -->
+    <div id="reportContent" class="hidden">
+      <!-- 统计指标 -->
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-label">扫描根目录</div>
+          <div class="stat-value" id="statRoot" style="font-size: 1.1rem; word-break: break-all;">-</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">待隔离项目总数</div>
+          <div class="stat-value" id="statTotalJobs" style="color: var(--primary)">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">完整重复文件夹</div>
+          <div class="stat-value" id="statFolderJobs" style="color: var(--folder-color)">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">零散重复文件</div>
+          <div class="stat-value" id="statFileJobs" style="color: var(--file-color)">0</div>
+        </div>
+      </div>
+
+      <!-- 搜索与筛选 -->
+      <div class="controls">
+        <input type="text" id="searchInput" class="search-input" placeholder="搜索路径或文件名..." oninput="filterJobs()">
+        <select id="typeFilter" class="select-input" onchange="filterJobs()">
+          <option value="all">全部类型</option>
+          <option value="folder">仅完整文件夹</option>
+          <option value="file">仅零散文件</option>
+        </select>
+      </div>
+
+      <!-- 列表区 -->
+      <div id="jobList" class="job-list"></div>
+    </div>
+  </div>
+
+  <script>
+    let currentReport = null;
+
+    // 拖拽事件
+    const dropZone = document.getElementById('dropZone');
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+      dropZone.addEventListener(eventName, preventDefaults, false);
+    });
+
+    function preventDefaults(e) { e.preventDefault(); e.stopPropagation(); }
+
+    ['dragenter', 'dragover'].forEach(eventName => {
+      dropZone.addEventListener(eventName, () => dropZone.classList.add('dragover'), false);
+    });
+
+    ['dragleave', 'drop'].forEach(eventName => {
+      dropZone.addEventListener(eventName, () => dropZone.classList.remove('dragover'), false);
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+      const dt = e.dataTransfer;
+      const files = dt.files;
+      if (files.length > 0) processFile(files[0]);
+    });
+
+    function handleFileSelect(e) {
+      if (e.target.files.length > 0) processFile(e.target.files[0]);
+    }
+
+    function processFile(file) {
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          const json = JSON.parse(e.target.result);
+          renderReport(json);
+        } catch (err) {
+          alert('解析 JSON 失败：' + err.message);
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    function renderReport(data) {
+      currentReport = data;
+      document.getElementById('reportContent').classList.remove('hidden');
+      
+      // 填充统计
+      document.getElementById('statRoot').textContent = data.root || '-';
+      const rows = data.rows || [];
+      document.getElementById('statTotalJobs').textContent = rows.length;
+      
+      const folderCount = rows.filter(r => r.kind === 'folder').length;
+      const fileCount = rows.filter(r => r.kind === 'file').length;
+      
+      document.getElementById('statFolderJobs').textContent = folderCount;
+      document.getElementById('statFileJobs').textContent = fileCount;
+
+      filterJobs();
+    }
+
+    function filterJobs() {
+      if (!currentReport) return;
+      const search = document.getElementById('searchInput').value.toLowerCase();
+      const type = document.getElementById('typeFilter').value;
+      const container = document.getElementById('jobList');
+      container.innerHTML = '';
+
+      const filtered = (currentReport.rows || []).filter(row => {
+        const matchesType = type === 'all' || row.kind === type;
+        const matchesSearch = !search || 
+          (row.source && row.source.toLowerCase().includes(search)) ||
+          (row.keeper && row.keeper.toLowerCase().includes(search));
+        return matchesType && matchesSearch;
+      });
+
+      if (filtered.length === 0) {
+        container.innerHTML = '<div class="empty-state">没有符合条件的重复项</div>';
+        return;
+      }
+
+      filtered.forEach(row => {
+        const card = document.createElement('div');
+        card.className = 'job-card';
+        
+        const isFolder = row.kind === 'folder';
+        const typeLabel = isFolder ? '📁 完整文件夹' : '📄 零散文件';
+        const typeClass = isFolder ? 'type-folder' : 'type-file';
+
+        card.innerHTML = `
+          <div class="job-header">
+            <span class="type-tag ${typeClass}">${typeLabel}</span>
+            <span class="status-tag">状态: ${row.status || 'preview'}</span>
+          </div>
+          <div class="compare-grid">
+            <div class="compare-box">
+              <div class="box-title keeper-title">✅ 保留副本 (Keeper)</div>
+              <div class="path-text">${escapeHtml(row.keeper)}</div>
+            </div>
+            <div class="compare-box">
+              <div class="box-title isolate-title">📦 待隔离副本 (Source)</div>
+              <div class="path-text">${escapeHtml(row.source)}</div>
+            </div>
+          </div>
+        `;
+        container.appendChild(card);
+      });
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+    }
+  </script>
+</body>
+</html>
