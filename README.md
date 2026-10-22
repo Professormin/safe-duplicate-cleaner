@@ -1,6 +1,101 @@
 <div align="center">
 
-![先保住完整的，再整理重复的](assets/hero.svg)
+![Protect Complete Folders First](assets/hero.svg)
+
+# Safe Duplicate Cleaner
+
+**Preserve complete project folders first, quarantine duplicate copies safely, and clean loose files without breaking simulation or code workspace dependencies.**
+
+*A conservative, zero-data-loss duplicate cleaner built for engineers, researchers, and digital asset collectors who fear accidental deletion.*
+
+**English** · [中文说明](#-中文说明)
+
+**Python 3.10+ · Zero Dependencies · Preview First · Never Delete (Quarantine Only) · MIT**
+
+</div>
+
+---
+
+## 💔 Does this sound like your digital storage?
+
+- **"I keep buying external hard drives, creating backups of backups..."**  
+  Working on simulations (ANSYS, COMSOL, MATLAB), software engineering, or media production generates massive amounts of data. When running out of space or switching devices, the quickest option is often a full copy-paste. Over time, drives stack up, each with incomplete, duplicate backups. Finding a specific project feels like digital archaeology.
+
+- **"I don't dare to use commercial 'One-Click Cleaners'!"**  
+  Standard duplicate cleaners compare files strictly by individual SHA-256 hashes across random folders. They break up complete simulation projects, code repositories, or design assets by deleting single files scattered across different directories, rendering entire projects unopenable.
+
+- **"I need a 100% safety guarantee against accidental deletion."**  
+  Your data is irreplaceable. If there's even a 0.01% chance of losing critical files, you'd rather let hard drives overflow. You need a tool that **previews by default, never permanently deletes, quarantines instead of erasing, and guarantees complete rollback traceability.**
+
+---
+
+## ✨ Why Safe Duplicate Cleaner?
+
+| Feature | Standard Duplicate Cleaners | Safe Duplicate Cleaner |
+| :--- | :--- | :--- |
+| **Folder Protection** | Breaks folders apart, deleting single files randomly | **Prioritizes complete duplicate folders**; quarantines entire directory copies together |
+| **Data Safety** | Permanent deletion / Recycles to bin | **Zero permanent deletion**; safely moves copies to a local quarantine area |
+| **Execution Mode** | Cleans immediately | **Preview-only by default**; generates CSV / JSON reports before any action |
+| **State Protection** | Ignores concurrent lock/file changes | **Safety trip-lock**; re-checks files before isolation & logs state in SQLite WAL |
+| **Loose Files** | Indiscriminate global cleaning | Cleans loose files **only inside safe leaf directories** |
+
+---
+
+## 🛡️ Two-Level Conservative Strategy
+
+```text
+[Scan Root Folder]
+  ├── 📁 Project_A (Copy 1) \___ 1️⃣ Level 1: Identified as Complete Duplicate Folder!
+  ├── 📁 Project_A (Copy 2) /    👉 Quarantine [Project_A (Copy 2)] as a whole package!
+  │                                 Never break up internal project configs or data!
+  └── 📁 Logs Leaf Directory \___ 2️⃣ Level 2: Safe Leaf Directory
+        ├── log_01.txt           👉 Clean loose duplicate files strictly inside
+        └── log_01_copy.txt         leaf directories without subfolders
+```
+
+1. **Level 1: Outermost Complete Duplicate Folders First**  
+   Folders with identical relative directory structures, file sizes, SHA-256 hashes, and empty folder layouts are recognized as complete duplicates. One copy is preserved (Keeper), while extra copies are moved as whole folders into quarantine.
+2. **Level 2: Leaf Directory Loose File Cleaning**  
+   Loose file cleaning is restricted to "leaf directories" (folders containing no subdirectories). Parent directories with subdirectories are protected from loose file removal.
+3. **Cross-Directory Duplicates: Report Only**  
+   Partially copied or incomplete folders are listed in reports but never merged or torn apart automatically.
+
+---
+
+## 🚀 Quick Start
+
+### Requirements
+- **Python 3.10+** (Runs entirely on standard library, no third-party packages required).
+- Supports **Windows / macOS / Linux**.
+
+### 1. Dual-Click Mode (Easiest)
+1. Copy `两级重复文件安全清理.py` into the directory you want to clean.
+2. Double-click to run. It defaults to preview mode, scans file size candidates, calculates SHA-256, and outputs a UTF-8 BOM CSV report (openable in Excel) under `_重复文件报告`.
+3. Review the report. If satisfied, change `MOVE_DUPLICATES = False` to `True` at the top of the script and run again to perform quarantine.
+
+### 2. Command Line Interface (CLI)
+
+```powershell
+# Preview Mode (Default, Safe & Non-destructive)
+python "两级重复文件安全清理.py" "D:\MyData" --output "D:\Reports"
+
+# Quarantine Mode (Explicitly Enabled)
+python "两级重复文件安全清理.py" "D:\MyData" --output "D:\Reports" --apply
+```
+
+### 3. Graphical Interface (GUI) & Visual Web Viewer
+- **Desktop GUI**: Run `python gui.py` for a Tkinter desktop window featuring real-time progress, thread isolation, and stale-path protection.
+- **Web Report Viewer**: Open `viewer.html` in any browser and drag-and-drop the generated JSON report for an interactive dashboard.
+
+---
+
+<br/>
+
+---
+
+## 🇨🇳 中文说明
+
+<div align="center">
 
 # 盘越来越多，资料却越来越难找。
 
@@ -9,13 +104,9 @@
 Safe Duplicate Cleaner · 两级重复文件安全清理  
 从不敢动的重复副本开始，让数字资产整理有一个可检查的起点。
 
-**Python 3.10+ · 默认仅预览 · 完整目录优先 · MIT**
-
-[为什么做这个](#为什么做这个) · [它怎样保护文件夹](#它怎样保护文件夹) · [先试一次预览](#先试一次预览) · [后续方向](#后续方向)
-
 </div>
 
-## 你是不是也有这些文件夹？
+### 💔 你是不是也有这些文件夹？
 
 ```text
 旧电脑备份/
@@ -27,133 +118,42 @@ Safe Duplicate Cleaner · 两级重复文件安全清理
 最终版_真的最终版/
 ```
 
-盘满了，买一块新的。怕漏文件，把旧盘整个复制过去。忙完这一阵再整理——然后下一阵忙又来了。
+- **“硬盘买了一个又一个，里面全是‘备份的备份’……”**  
+  做模拟、搞工程、做设计，数据和项目极多。因为太忙太累、时间有限，每次换设备或备份时，最快的方式就是全盘/整目录直接复制粘贴。久而久之，移动硬盘、U盘堆成山，盘盘都有备份，盘盘都不完整。
 
-真正要找东西时，却不知道该插哪块盘；搜到几个同名文件夹，又不敢确定哪份完整。想清理，看到一长串“重复文件”，手停在删除按钮前：**它们真能删吗？会不会刚好删掉唯一完整的那一套？**
+- **“根本不敢用市面上的‘一键清理大师’！”**  
+  模拟工程（ANSYS、COMSOL、OpenFOAM、MATLAB）、代码仓库或设计项目，内部有严密的相对路径和配置文件。市面上的清理工具只会生硬地按单文件 SHA256 跨目录乱删，直接打散工程目录，导致仿真工程再也打不开。
 
-| 表面上的问题 | 真正让人累的地方 |
-| --- | --- |
-| U 盘、移动硬盘越来越多 | 记不住资料在哪块盘，每次找文件都像重新考古 |
-| 一份资料反复复制 | 分不清哪份是备份、工作副本，哪份还没复制完 |
-| 文件名相同，内容未必相同 | 不敢凭名字或大小决定删哪份 |
-| 模拟项目、模型、输入和结果散在各处 | 单个文件还在，整个项目却未必能完整复用 |
-| 想整理，但总没有整块时间 | 每次都要重新判断，最后只能继续“先放着” |
-| 很怕误删 | 宁愿再买一块盘，也不愿冒险丢掉多年积累 |
+- **“极度害怕误删，需要 100% 的‘后悔药’。”**  
+  数字资产过于宝贵，你需要的是一个**只隔离、不删除、默认纯预览、断点增量续扫**的绝对安全工具。
 
-## 为什么做这个
+---
 
-> 我做模拟，积累了很多数字资产。U 盘和硬盘越来越多，但时间有限，整理这件事总被往后推。
->
-> 我怕误删，所以最常做的事就是：买一个盘，复制粘贴；再买一个盘，再复制粘贴。最后东西似乎都保存了，自己却越来越找不到想要的那份。
->
-> 我希望整理资料时，不必一开始就做“删还是不删”这种让人紧张的决定。先看清楚哪些完整重复，保住一套完整的，再慢慢处理剩下的。
+### ✨ 核心特性
 
-这个项目从这一步开始：**把可以确认的重复副本列出来；需要处理时先隔离，并留下记录。**
+1. **增量扫描与断点续扫（SQLite 数据库索引 `cleaner_vault.db`）**  
+   二次运行或中途中断再次扫描时，自动复用哈希缓存，不重复读取未修改的大文件，比对秒速完成。
+2. **第一级：完整工程文件夹优先整包隔离（选项 A）**  
+   相对文件结构、文件大小与 SHA-256 完全一致的文件夹，整体移入隔离区，绝不打散工程内部相对路径与配置文件。
+3. **自动跳过回收站与系统保护区**  
+   自动过滤 Windows `$RECYCLE.BIN`、`RECYCLER` 及 `System Volume Information`，避免已删除的垃圾文件误判污染。
+4. **多样化交互**  
+   支持双击即用、命令行 CLI、Tkinter 桌面 GUI (`gui.py`) 以及网页端暗黑风报告查看器 (`viewer.html`)。
 
-它现在是一个可独立运行的 Python 工具。将它封装成可复用的 AI skill，是后续方向；当前仓库还不是可直接安装的 skill。
+---
 
-## 它怎样保护文件夹
+## 🧪 Automated Test Suite
 
-对于模拟资料，一套文件之间的关系往往和文件本身一样重要。只逐个比较文件、跨文件夹挑选保留项，容易让原本完整的两套资料都变得零散。
-
-这里先看整套目录，再看散文件：
-
-```text
-整理前                           整理后（显式执行隔离）
-
-资料/                            资料/
-├─ 项目_A/                       ├─ 项目_A/          ← 整套保留
-│  ├─ 输入/                      │  ├─ 输入/
-│  ├─ 模型/                      │  ├─ 模型/
-│  └─ 结果/                      │  └─ 结果/
-└─ 项目_A_副本/                  └─ _重复文件隔离区/
-   ├─ 输入/                         └─ …/项目_A_副本/ ← 整套隔离
-   ├─ 模型/
-   └─ 结果/
-
-前提：两个同级目录的相对文件路径、内容与空目录结构完全一致。
-```
-
-**第一步：完整重复文件夹。** 先处理外层完整目录，保留一份，其他副本整目录隔离。被选中的整个重复组都受到保护，二级清理不再进入它们内部。
-
-**第二步：零散重复文件。** 只在未受保护、没有子目录的文件夹内处理重复文件。跨目录零散重复只报告，部分复制的目录不合并、不拆散。
-
-同名不代表重复。程序通过 SHA-256 比较内容；执行前重新核查源和保留副本，发生变化就跳过。
-
-## 先看清楚，再决定
-
-| 设计 | 对你意味着什么 |
-| --- | --- |
-| 默认仅预览 | 第一次运行只生成报告，不移动扫描目录中的文件 |
-| 显式 --apply 才隔离 | 看完报告后，再决定是否处理 |
-| 整套文件夹优先 | 不为了多清几个文件，把保留的完整副本拆开 |
-| 隔离，不永久删除 | 副本仍在磁盘上，日志记录它去了哪里 |
-| 移动前后记录日志 | 出现中断时有位置可查；异常运行锁阻止盲目重跑 |
-
-隔离不会释放磁盘空间，也不等于新增了一份备份。工具不提供永久删除功能。
-
-## 先试一次预览
-
-需要 **Python 3.10+**，不依赖第三方库。已在 Windows 模拟目录中验证。
-
-**最简单的用法：把 `两级重复文件安全清理.py` 放进要整理的文件夹，然后双击。**
-
-默认预览程序所在文件夹，报告自动存入其中的 `_重复文件报告`，结束后按回车关闭窗口。无需输入路径，无需使用命令行。和原版一样，确认预览后可在代码顶部把 `MOVE_DUPLICATES = False` 改为 `True`，再次双击才会实际隔离。
-
-如果习惯命令行，也可以显式指定目录：
-
-```powershell
-python "两级重复文件安全清理.py" "D:\待整理资料" --output "D:\清理报告"
-```
-
-把两个路径换成自己的目录。自定义报告目录应在扫描目录之外；默认专用报告目录会自动排除。 查看生成的 CSV 报告（Excel 可打开），确认保留项和拟隔离项。当前没有图形界面，报告也暂未提供可视化浏览。
-
-第一次建议先用模拟测试体验，测试只操作它新建的模拟目录：
+Tested against **32 comprehensive test cases** covering folder integrity, nested duplicates, partial copies, corrupt files, interrupted execution recovery, and SQLite journal safety:
 
 ```powershell
 python test_safe_cleanup.py
 ```
 
-实际隔离命令、中断核查及详细规则，请看 **[使用指南](docs/使用指南.md)**。
-
-## 安全感需要证据
-
-当前版本在 Windows 模拟环境中通过 **32 项测试**，包括：
-
-- 三份完整重复、内外层同时重复：验证保留目录不被拆散。
-- 同名异内容、部分复制、空目录不同：验证不误判为完整重复。
-- 保留副本内容损坏、文件新增或缺失：验证变化后跳过处理。
-- 移动前后中断、子进程突然退出、日志写入失败：验证停止行为和可追踪性。
-
-[阅读完整测试报告](测试报告.md) · [查看测试代码](test_safe_cleanup.py)
-
-测试不是“绝不会丢数据”的保证。实际执行前仍需独立备份，并停止同步、复制等写入程序。程序比较普通文件的主数据流，不比较 Windows ADS、ACL 等扩展元数据；也不能判断一份模拟结果是否有效、哪个版本更有价值。更多边界见 [使用指南](docs/使用指南.md#安全边界)。
-
-## 后续方向
-
-**找不到资料**是更大的痛点，重复文件清理只是第一步。下面是希望继续探索的方向，尚未实现：
-
-- [ ] **离线磁盘目录**：盘没插上，也能知道某份资料大概在哪块盘。
-- [ ] **跨盘资产检索**：少翻几个“备份_最终版”，更快找到需要的项目。
-- [ ] **更容易读的报告**：直观看到保留、隔离和跳过的原因。
-- [ ] **可复用 AI skill**：把扫描、解释报告、确认和执行整理成明确的交互流程。
-
-当前版本不会自动整理所有硬盘，不做语义搜索，也不会跨盘删除备份。重要的异盘备份应继续保留，不能因为内容相同就失去它作为备份的价值。
-
-## 你的硬盘里，也有一个“先别删”吗？
-
-欢迎在 Issues 分享一个最让你头疼的整理场景：你通常找不到什么？最怕误删什么？哪一步让你总想“下次再整理”？
-
-描述目录结构和操作过程就足够了，请不要上传真实项目、敏感文件或私人数据。可复现的问题、功能建议和改进 PR 都欢迎。
-
-如果你也希望先保住完整资料，再慢慢理清重复，欢迎 Star 关注这个项目的进展。
+See [测试报告.md](测试报告.md) for full details.
 
 ---
 
-[MIT License](LICENSE) · 软件按现状提供 · 先预览，再决定
+## 📄 License
 
-## 扫描进度与容量统计
-
-运行时约每秒显示当前阶段、目录与已校验文件计数、累计读取容量、耗时和当前路径。大文件显示已读/文件大小；磁盘等待时仍有心跳提示。总量未知时不显示整体百分比。最终统计包含扫描文件夹数、文件数、总容量、完整重复目录容量、零散重复容量、计划与实际隔离容量、跳过项及耗时。累计读取量可能包含复核的重复读取，不等于扫描文件总容量。
-
-现在先统计文件大小，只给同大小候选计算 SHA-256，大小唯一的文件无需读完整内容。恢复顶部 `EXTENSIONS` 配置（默认 `None`，全部类型），例如 `(".jpg", ".png")`。有类型筛选时，包含未选类型的目录不会整目录隔离，扫描总数仍包括全部文件。CSV 用 Excel 打开即可，JSON 作为补充记录保留。
+This project is open-sourced under the [MIT License](LICENSE).
