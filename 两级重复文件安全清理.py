@@ -137,7 +137,8 @@ def read_file(path):
 
 
 def scan(root, exclude_reserved=False, hash_files=True):
-    """任何不可读项或链接均使扫描失败，不把缺失项当作空目录。"""
+    """任何不可读项或链接均使扫描失败，不把缺失项当作空目录。
+    默认跳过 Windows 系统目录和回收站，避免扫描无用文件。"""
     root = Path(root)
     files, dirs = {}, set()
 
@@ -153,7 +154,10 @@ def scan(root, exclude_reserved=False, hash_files=True):
             PROGRESS.dirs += 1
         before = sorted(path.iterdir(), key=lambda p: p.name)
         for child in before:
+            # 自动跳过保留区、报告目录、Windows 回收站与系统隐藏目录
             if exclude_reserved and path == root and child.name in (RESERVED, REPORTS):
+                continue
+            if child.name.upper() in ('$RECYCLE.BIN', 'SYSTEM VOLUME INFORMATION', 'RECYCLER'):
                 continue
             cs = child.lstat()
             if linked(cs):
