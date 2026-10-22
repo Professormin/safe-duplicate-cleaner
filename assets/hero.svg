@@ -1,16 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360" role="img" aria-labelledby="title desc">
   <title id="title">Safe Duplicate Cleaner</title>
-  <desc id="desc">默认预览，完整目录优先，隔离不删除。</desc>
+  <desc id="desc">Preview First. Complete Folders First. Quarantine, Never Delete.</desc>
   <defs><linearGradient id="bg" x2="1" y2="1"><stop stop-color="#10202e"/><stop offset="1" stop-color="#152e36"/></linearGradient></defs>
   <rect width="1200" height="360" rx="22" fill="url(#bg)"/>
-  <g font-family="Segoe UI, Microsoft YaHei, sans-serif">
+  <g font-family="Segoe UI, -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif">
     <text x="58" y="67" fill="#70dbc1" font-size="15" letter-spacing="3">SAFE DUPLICATE CLEANER</text>
-    <text x="55" y="141" fill="#f1f5f9" font-size="38" font-weight="700">先保住完整的，再整理重复的。</text>
-    <text x="58" y="186" fill="#adc1ca" font-size="19">给那些一直想整理、却又不敢删的数字资产。</text>
-    <g font-size="15" fill="#d7e9e7">
-      <rect x="58" y="237" width="120" height="39" rx="19" fill="#25424b"/><text x="86" y="262">默认预览</text>
-      <rect x="192" y="237" width="145" height="39" rx="19" fill="#25424b"/><text x="216" y="262">完整目录优先</text>
-      <rect x="351" y="237" width="135" height="39" rx="19" fill="#25424b"/><text x="374" y="262">隔离不删除</text>
+    <text x="55" y="141" fill="#f1f5f9" font-size="36" font-weight="700">Preserve Complete Folders First.</text>
+    <text x="58" y="186" fill="#adc1ca" font-size="19">Zero data loss duplicate cleaner for engineers &amp; researchers.</text>
+    <g font-size="14" fill="#d7e9e7">
+      <rect x="58" y="237" width="130" height="39" rx="19" fill="#25424b"/><text x="82" y="261">Preview First</text>
+      <rect x="202" y="237" width="180" height="39" rx="19" fill="#25424b"/><text x="222" y="261">Complete Folders First</text>
+      <rect x="396" y="237" width="155" height="39" rx="19" fill="#25424b"/><text x="416" y="261">Quarantine Only</text>
     </g>
     <g transform="translate(858 69)">
       <rect x="-22" y="0" width="220" height="139" rx="12" fill="#203943" stroke="#43606a" transform="rotate(-10 88 69)"/>
@@ -18,7 +18,7 @@
       <path d="M0 80 Q0 68 12 68 H74 L94 89 H208 Q220 89 220 101 V207 Q220 219 208 219 H12 Q0 219 0 207Z" fill="#102b30" stroke="#70dbc1" stroke-width="2"/>
       <circle cx="110" cy="145" r="27" fill="#70dbc1"/>
       <path d="m97 145 9 9 18-21" fill="none" stroke="#102b30" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
-      <text x="110" y="196" text-anchor="middle" fill="#bce9dc" font-size="15">保留一套完整的</text>
+      <text x="110" y="196" text-anchor="middle" fill="#bce9dc" font-size="14">Keep Intact Set</text>
     </g>
   </g>
 </svg>
