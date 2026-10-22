@@ -115,10 +115,10 @@ class SafetyTests(unittest.TestCase):
     def test_unreadable_file_aborts_scan(self):
         self.twins()
         original = c.read_file
-        def fail(path):
-            if 'B' in path.parts:
+        def fail(path, *args, **kwargs):
+            if 'B' in Path(path).parts:
                 raise PermissionError('模拟读取失败')
-            return original(path)
+            return original(path, *args, **kwargs)
         with patch.object(c, 'read_file', side_effect=fail):
             with self.assertRaises(PermissionError):
                 c.plan(self.root)
