@@ -178,7 +178,11 @@ class VaultDB:
 def read_file(path, root=None, db=None):
     if PROGRESS:
         PROGRESS.current(path)
-    before = path.lstat()
+    try:
+        before = path.lstat()
+    except (OSError, SafetyError) as exc:
+        raise SafetyError(f'无法获取元数据或文件丢失：{path}') from exc
+
     if PROGRESS:
         PROGRESS.current(path, before.st_size)
     if linked(before) or not stat.S_ISREG(before.st_mode):
@@ -193,18 +197,22 @@ def read_file(path, root=None, db=None):
                     PROGRESS.cached_hashes += 1
                     PROGRESS.files += 1
                 return (before.st_size, cached_sha, fingerprint(before))
-        except ValueError:
+        except (ValueError, OSError):
             pass
 
     h = hashlib.sha256()
-    with path.open('rb') as stream:
-        if fingerprint(os.fstat(stream.fileno())) != fingerprint(before):
-            raise SafetyError(f'打开时文件变化：{path}')
-        for block in iter(lambda: stream.read(CHUNK), b''):
-            h.update(block)
-            if PROGRESS:
-                PROGRESS.read(len(block))
-        after = os.fstat(stream.fileno())
+    try:
+        with path.open('rb') as stream:
+            if fingerprint(os.fstat(stream.fileno())) != fingerprint(before):
+                raise SafetyError(f'打开时文件变化：{path}')
+            for block in iter(lambda: stream.read(CHUNK), b''):
+                h.update(block)
+                if PROGRESS:
+                    PROGRESS.read(len(block))
+            after = os.fstat(stream.fileno())
+    except (OSError, SafetyError) as exc:
+        raise SafetyError(f'读取或打开文件失败/文件并发变动：{path}') from exc
+
     if fingerprint(before) != fingerprint(after) or fingerprint(path.lstat()) != fingerprint(before):
         raise SafetyError(f'读取期间文件变化：{path}')
     if PROGRESS:
@@ -215,7 +223,7 @@ def read_file(path, root=None, db=None):
         try:
             rel_path = path.relative_to(root).as_posix()
             db.set_cached_hash(rel_path, before.st_size, before.st_mtime_ns, sha)
-        except ValueError:
+        except (ValueError, OSError):
             pass
 
     return (before.st_size, sha, fingerprint(before))
@@ -310,10 +318,15 @@ def plan(root, db=None):
     for names in potential:
         for name in names:
             old = tree['files'][name]
-            value = read_file(root / name, root, db)
-            if value[2] != old[2]:
-                raise SafetyError(f'扫描后文件发生变化：{root / name}')
-            tree['files'][name] = value
+            try:
+                value = read_file(root / name, root, db)
+                if value[2] != old[2]:
+                    # 文件在元数据扫描和哈希计算之间被修改，安全跳过此文件的哈希计算
+                    continue
+                tree['files'][name] = value
+            except (FileNotFoundError, SafetyError) as exc:
+                # 单个候选文件丢失或读取变动，跳过此文件比对，不崩溃退出
+                continue
     if PROGRESS:
         PROGRESS.phase('3/4 优先查找完整重复文件夹（选项 A）')
     groups = defaultdict(list)
@@ -323,7 +336,7 @@ def plan(root, db=None):
         sub = subtree(tree, name)
         # 未哈希文件不参与完整目录判重；筛选时不连带移动未选类型。
         if sub['files'] and all(v[1] is not None for v in sub['files'].values()):
-            groups[(str(Path(name).parent), content(sub))].append(name)
+            groups[content(sub)].append(name)
     jobs, protected = [], set()
     for group in groups.values():
         if len(group) < 2 or any(under(n, p) for n in group for p in protected):
