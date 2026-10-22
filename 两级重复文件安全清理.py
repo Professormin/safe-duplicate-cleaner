@@ -1,7 +1,9 @@
 """保守的两级重复清理。默认预览；只隔离，不删除。Python 3.10+。
 
 python 两级重复文件安全清理.py 路径 --output 报告目录
-显式添加 --apply 才隔离。运行时应停止其他程序修改扫描目录。
+双击默认预览脚本所在文件夹，结束后按回车退出。
+显式添加 --apply 才隔离；双击模式也可将 MOVE_DUPLICATES 改为 True。
+运行时应停止其他程序修改扫描目录。
 同级完整目录优先；保护其全部目录树；其余叶子目录仅清理内部重复。
 """
 import argparse
@@ -9,12 +11,87 @@ import hashlib
 import json
 import os
 import stat
+import sys
+import threading
+import time
 import uuid
 from collections import defaultdict
 from pathlib import Path
 
 RESERVED = '_重复文件隔离区'
+REPORTS = '_重复文件报告'
+MOVE_DUPLICATES = False  # 与原程序一致：先预览，确认后改为 True 才隔离。
 CHUNK = 1024 * 1024
+PROGRESS = None
+
+
+def readable_size(n):
+    for unit in ('B', 'KiB', 'MiB', 'GiB', 'TiB'):
+        if n < 1024 or unit == 'TiB':
+            return f'{n:.2f} {unit}'
+        n /= 1024
+
+
+class Progress:
+    """独立心跳只输出状态，不访问磁盘；磁盘读取阻塞时也能显示等待。"""
+    def __init__(self):
+        self.started = self.changed = time.monotonic()
+        self.stage = '准备扫描'
+        self.path = ''
+        self.files = self.dirs = self.bytes = self.offset = self.size = 0
+        self.stop = threading.Event()
+        self.lock = threading.Lock()
+
+    def phase(self, stage):
+        with self.lock:
+            self.stage = stage
+            self.path = ''
+            self.offset = self.size = 0
+        self.render()
+
+    def current(self, path, size=0):
+        with self.lock:
+            self.path = str(path)
+            self.offset, self.size = 0, size
+            self.changed = time.monotonic()
+
+    def read(self, amount):
+        with self.lock:
+            self.offset += amount
+            self.bytes += amount
+            self.changed = time.monotonic()
+
+    def render(self):
+        with self.lock:
+            elapsed = time.monotonic() - self.started
+            idle = time.monotonic() - self.changed
+            message = (f'[{self.stage}] 目录 {self.dirs} | 已校验文件 {self.files} | '
+                       f'累计读取 {readable_size(self.bytes)} | 用时 {elapsed:.0f} 秒')
+            if self.path:
+                message += f'\n  当前：{self.path}'
+                if self.size:
+                    message += f'（{readable_size(self.offset)} / {readable_size(self.size)}）'
+            if idle >= 5:
+                message += f'\n  本步骤 {idle:.0f} 秒未更新，可能正在等待磁盘或处理目录；可按 Ctrl+C 停止。'
+        print(message, flush=True)
+
+    def heartbeat(self):
+        while not self.stop.wait(1):
+            self.render()
+
+    def __enter__(self):
+        global PROGRESS
+        PROGRESS = self
+        self.thread = threading.Thread(target=self.heartbeat, daemon=True)
+        self.thread.start()
+        return self
+
+    def __exit__(self, *exc):
+        global PROGRESS
+        self.stop.set()
+        self.thread.join(timeout=2)
+        self.render()
+        PROGRESS = None
 
 
 class SafetyError(RuntimeError):
@@ -32,7 +109,11 @@ def fingerprint(st):
 
 
 def read_file(path):
+    if PROGRESS:
+        PROGRESS.current(path)
     before = path.lstat()
+    if PROGRESS:
+        PROGRESS.current(path, before.st_size)
     if linked(before) or not stat.S_ISREG(before.st_mode):
         raise SafetyError(f'拒绝链接或特殊文件：{path}')
     h = hashlib.sha256()
@@ -41,9 +122,13 @@ def read_file(path):
             raise SafetyError(f'打开时文件变化：{path}')
         for block in iter(lambda: stream.read(CHUNK), b''):
             h.update(block)
+            if PROGRESS:
+                PROGRESS.read(len(block))
         after = os.fstat(stream.fileno())
     if fingerprint(before) != fingerprint(after) or fingerprint(path.lstat()) != fingerprint(before):
         raise SafetyError(f'读取期间文件变化：{path}')
+    if PROGRESS:
+        PROGRESS.files += 1
     return (before.st_size, h.hexdigest(), fingerprint(before))
 
 
@@ -53,14 +138,18 @@ def scan(root, exclude_reserved=False):
     files, dirs = {}, set()
 
     def visit(path):
+        if PROGRESS:
+            PROGRESS.current(path)
         st = path.lstat()
         if linked(st) or not stat.S_ISDIR(st.st_mode):
             raise SafetyError(f'拒绝链接或非目录：{path}')
         rel = path.relative_to(root).as_posix()
         dirs.add(rel)
+        if PROGRESS:
+            PROGRESS.dirs += 1
         before = sorted(path.iterdir(), key=lambda p: p.name)
         for child in before:
-            if exclude_reserved and path == root and child.name == RESERVED:
+            if exclude_reserved and path == root and child.name in (RESERVED, REPORTS):
                 continue
             cs = child.lstat()
             if linked(cs):
@@ -100,9 +189,15 @@ def plan(root):
     for p in (root, *root.parents):
         if linked(p.lstat()):
             raise SafetyError(f'根路径含链接：{p}')
+    if PROGRESS:
+        PROGRESS.phase('扫描与内容校验')
     tree = scan(root, True)
+    if PROGRESS:
+        PROGRESS.phase('比较完整文件夹')
     groups = defaultdict(list)
     for name in sorted(tree['dirs'] - {'.'}, key=lambda s: (s.count('/'), order(s))):
+        if PROGRESS:
+            PROGRESS.current(root / name)
         sub = subtree(tree, name)
         if sub['files']:  # 纯空目录不清理，但空目录结构参与完整目录比较。
             groups[(str(Path(name).parent), content(sub))].append(name)
@@ -116,6 +211,8 @@ def plan(root):
         for source in group[1:]:
             jobs.append({'kind': 'folder', 'source': source, 'keeper': keeper,
                          'expected': subtree(tree, source), 'keep_expected': subtree(tree, keeper)})
+    if PROGRESS:
+        PROGRESS.phase('比较零散重复文件')
     leaves = tree['dirs'] - {str(Path(d).parent).replace('\\', '/') for d in tree['dirs'] if d != '.'}
     fg, cross = defaultdict(list), defaultdict(list)
     for name, value in tree['files'].items():
@@ -128,7 +225,13 @@ def plan(root):
         for source in group[1:]:
             jobs.append({'kind': 'file', 'source': source, 'keeper': group[0],
                          'expected': tree['files'][source], 'keep_expected': tree['files'][group[0]]})
+    for job in jobs:
+        job['bytes'] = (sum(v[0] for v in job['expected']['files'].values())
+                        if job['kind'] == 'folder' else job['expected'][0])
+        job['file_count'] = len(job['expected']['files']) if job['kind'] == 'folder' else 1
     return {'root': str(root), 'jobs': jobs, 'protected': sorted(protected),
+            'scan_files': len(tree['files']), 'scan_dirs': len(tree['dirs']) - 1,
+            'scan_bytes': sum(v[0] for v in tree['files'].values()),
             'cross_directory_groups': [sorted(v) for v in cross.values()
                                        if len({str(Path(n).parent) for n in v}) > 1]}
 
@@ -162,8 +265,11 @@ def audit(journal):
 
 def execute(p, output, apply=False, hook=None):
     root, output = Path(p['root']), Path(output).absolute()
-    if output == root or root in output.parents:
-        raise SafetyError('报告目录必须在扫描根目录之外')
+    if (output == root or root in output.parents) and output != root / REPORTS:
+        raise SafetyError(f'报告目录应在扫描目录之外，或使用专用目录 {REPORTS}')
+    for ancestor in (output, *output.parents):
+        if os.path.lexists(ancestor) and linked(ancestor.lstat()):
+            raise SafetyError('报告路径包含链接或重解析点')
     output.mkdir(parents=True, exist_ok=True)
     run = uuid.uuid4().hex
     journal = output / f'清理日志_{run}.jsonl'
@@ -186,8 +292,11 @@ def execute(p, output, apply=False, hook=None):
             if target.stat().st_dev != root.stat().st_dev:
                 raise SafetyError('隔离区跨文件系统，禁止复制后删除')
         for i, job in enumerate(p['jobs']):
+            if PROGRESS:
+                PROGRESS.phase(f'{"复核与隔离" if apply else "生成预览"} {i + 1}/{len(p["jobs"])}')
             source, keeper = root / job['source'], root / job['keeper']
-            row = {'id': i, 'kind': job['kind'], 'source': str(source), 'keeper': str(keeper)}
+            row = {'id': i, 'kind': job['kind'], 'source': str(source), 'keeper': str(keeper),
+                   'bytes': job['bytes'], 'file_count': job['file_count']}
             if not apply:
                 rows.append({**row, 'status': 'preview'})
                 continue
@@ -202,7 +311,7 @@ def execute(p, output, apply=False, hook=None):
                     unchanged = (scan(source) == job['expected'] and scan(keeper) == job['keep_expected'])
                 else:
                     leaf = all(not linked(x.lstat()) and not x.is_dir() for x in source.parent.iterdir()
-                               if not (source.parent == root and x.name == RESERVED))
+                               if not (source.parent == root and x.name in (RESERVED, REPORTS)))
                     unchanged = (leaf and read_file(source) == job['expected'] and read_file(keeper) == job['keep_expected'])
             except (OSError, SafetyError) as exc:
                 unchanged = False
@@ -236,32 +345,72 @@ def execute(p, output, apply=False, hook=None):
     finally:
         report = output / f'清理报告_{run}.json'
         report.write_text(json.dumps({'root': str(root), 'apply': apply, 'rows': rows,
+                          'statistics': statistics(p, rows),
                           'protected': p['protected'], 'cross_directory_groups': p['cross_directory_groups'],
                           'journal': str(journal) if apply else None,
                           'manual_audit_required': locked}, ensure_ascii=False, indent=2), encoding='utf-8')
     return report
 
 
+def statistics(p, rows):
+    return {'scan_files': p['scan_files'], 'scan_dirs': p['scan_dirs'], 'scan_bytes': p['scan_bytes'],
+            'folder_jobs': sum(j['kind'] == 'folder' for j in p['jobs']),
+            'folder_bytes': sum(j['bytes'] for j in p['jobs'] if j['kind'] == 'folder'),
+            'file_jobs': sum(j['kind'] == 'file' for j in p['jobs']),
+            'file_bytes': sum(j['bytes'] for j in p['jobs'] if j['kind'] == 'file'),
+            'planned_bytes': sum(j['bytes'] for j in p['jobs']),
+            'moved_items': sum(r['status'] == 'done' for r in rows),
+            'moved_files': sum(r['file_count'] for r in rows if r['status'] == 'done'),
+            'moved_bytes': sum(r['bytes'] for r in rows if r['status'] == 'done'),
+            'skipped_items': sum(r['status'] == 'skipped' for r in rows)}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('root', nargs='?', type=Path)
-    parser.add_argument('--output', type=Path, default=Path.cwd() / '清理报告')
+    parser.add_argument('--output', type=Path, help='默认写入扫描目录中的 _重复文件报告')
     parser.add_argument('--apply', action='store_true', help='实际隔离（不删除）')
     parser.add_argument('--audit', type=Path, help='只读检查已有日志')
     args = parser.parse_args()
     if args.audit:
         print(json.dumps(audit(args.audit), ensure_ascii=False, indent=2))
         return
-    if args.root is None:
-        parser.error('必须显式指定扫描根目录')
+    root = args.root if args.root is not None else Path(__file__).resolve().parent
+    output = args.output if args.output is not None else root / REPORTS
+    apply = args.apply or (len(sys.argv) == 1 and MOVE_DUPLICATES)
     try:
-        p = plan(args.root)
-        report = execute(p, args.output, args.apply)
-        print('模式：', '隔离' if args.apply else '预览')
-        print('计划项目：', len(p['jobs']), '\n报告：', report)
+        print('扫描位置：', root.absolute(), flush=True)
+        print('模式：', '实际隔离（不删除）' if apply else '安全预览（不移动、不删除）', flush=True)
+        print('每秒显示进展；总量未知时不显示虚假百分比。按 Ctrl+C 可停止。', flush=True)
+        started = time.monotonic()
+        with Progress():
+            p = plan(root)
+            report = execute(p, output, apply)
+        stats = json.loads(report.read_text(encoding='utf-8'))['statistics']
+        print('\n========== 最终统计 ==========')
+        print(f'扫描：{stats["scan_dirs"]} 个文件夹，{stats["scan_files"]} 个文件，{readable_size(stats["scan_bytes"])}')
+        print(f'完整重复文件夹：{stats["folder_jobs"]} 个，{readable_size(stats["folder_bytes"])}')
+        print(f'零散重复文件：{stats["file_jobs"]} 个，{readable_size(stats["file_bytes"])}')
+        print('计划隔离总容量：', readable_size(stats['planned_bytes']))
+        print(f'实际隔离：{stats["moved_items"]} 项（含 {stats["moved_files"]} 个文件），{readable_size(stats["moved_bytes"])}')
+        print('跳过项目：', stats['skipped_items'])
+        print('跨目录重复内容组（仅报告）：', len(p['cross_directory_groups']))
+        print(f'总耗时：{time.monotonic() - started:.1f} 秒')
+        print('隔离不会释放磁盘空间。' if apply else '本次仅预览，没有移动或删除文件。')
+        print('报告：', report)
     except (OSError, SafetyError, KeyboardInterrupt) as exc:
         parser.exit(1, f'已停止：{exc}\n如有运行锁，请核查日志及隔离区后人工处理。\n')
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except Exception as exc:
+        print(f'程序未完成：{type(exc).__name__}: {exc}', file=sys.stderr)
+        raise SystemExit(1)
+    finally:
+        if len(sys.argv) == 1:
+            try:
+                input('\n按 Enter 退出……')
+            except (EOFError, KeyboardInterrupt):
+                pass

@@ -8,6 +8,9 @@ from unittest.mock import patch
 import uuid
 import subprocess
 import sys
+import io
+import threading
+from contextlib import redirect_stdout
 
 HERE = Path(__file__).resolve().parent
 spec = importlib.util.spec_from_file_location('cleaner', HERE / '两级重复文件安全清理.py')
@@ -178,6 +181,80 @@ class SafetyTests(unittest.TestCase):
         self.run_plan()
         self.assertTrue((self.root / 'a').exists())
         self.assertFalse((self.root / 'b').exists())
+
+    def test_double_click_defaults_to_script_folder(self):
+        self.put('a'); self.put('b')
+        script = self.root / '两级重复文件安全清理.py'
+        script.write_bytes((HERE / script.name).read_bytes())
+        result = subprocess.run([sys.executable, str(script)], cwd=self.case,
+                                input=b'\n', capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = next((self.root / c.REPORTS).glob('清理报告_*.json'))
+        data = json.loads(report.read_text(encoding='utf-8'))
+        self.assertEqual(Path(data['root']), self.root)
+        self.assertFalse(data['apply'])
+        self.assertTrue((self.root / 'a').exists())
+        self.assertTrue((self.root / 'b').exists())
+        self.assertEqual(len(data['rows']), 1)
+        self.assertIn('最终统计'.encode('utf-8'), result.stdout if os.environ.get('PYTHONIOENCODING') == 'utf-8' else result.stdout.decode(errors='replace').encode('utf-8')) if os.environ.get('PYTHONIOENCODING') == 'utf-8' else None
+
+    def test_internal_reports_excluded_on_repeat(self):
+        self.put('a'); self.put('b')
+        self.put(c.REPORTS + '/old_a'); self.put(c.REPORTS + '/old_b')
+        p = c.plan(self.root)
+        self.assertEqual(len(p['jobs']), 1)
+        c.execute(p, self.root / c.REPORTS, True)
+        self.assertFalse((self.root / 'b').exists())
+        self.assertTrue((self.root / c.REPORTS / 'old_b').exists())
+
+    def test_byte_statistics_without_nested_double_count(self):
+        self.twins()
+        self.put('Loose/a', b'12345'); self.put('Loose/b', b'12345')
+        p = c.plan(self.root)
+        preview = json.loads(self.run_plan(p, apply=False).read_text(encoding='utf-8'))['statistics']
+        self.assertEqual(preview['scan_bytes'], 16)
+        self.assertEqual(preview['scan_files'], 4)
+        self.assertEqual(preview['scan_dirs'], 5)
+        self.assertEqual(preview['folder_bytes'], 3)
+        self.assertEqual(preview['file_bytes'], 5)
+        self.assertEqual(preview['planned_bytes'], 8)
+        self.assertEqual(preview['moved_bytes'], 0)
+        actual = json.loads(self.run_plan(p).read_text(encoding='utf-8'))['statistics']
+        self.assertEqual(actual['moved_bytes'], 8)
+        self.assertEqual(actual['moved_items'], 2)
+        self.assertEqual(actual['moved_files'], 2)
+
+    def test_skipped_bytes_not_counted_as_moved(self):
+        self.twins(); p = c.plan(self.root)
+        self.put('B/new', b'new')
+        data = json.loads(self.run_plan(p).read_text(encoding='utf-8'))['statistics']
+        self.assertEqual(data['planned_bytes'], 3)
+        self.assertEqual(data['moved_bytes'], 0)
+        self.assertEqual(data['skipped_items'], 1)
+
+    def test_progress_counts_chunks_inside_large_file(self):
+        f = self.put('large', b'x' * (c.CHUNK * 2 + 17))
+        progress = c.Progress()
+        with patch.object(c, 'PROGRESS', progress):
+            c.read_file(f)
+        self.assertEqual(progress.bytes, c.CHUNK * 2 + 17)
+        self.assertEqual(progress.offset, progress.size)
+        self.assertEqual(progress.files, 1)
+
+    def test_heartbeat_reports_while_worker_waits(self):
+        notified = threading.Event()
+        stream = io.StringIO()
+        with redirect_stdout(stream):
+            with c.Progress() as progress:
+                original = progress.render
+                def render():
+                    original()
+                    notified.set()
+                progress.render = render
+                progress.current(self.root / 'slow_file', 100)
+                self.assertTrue(notified.wait(4), '等待磁盘期间应持续输出')
+        self.assertIn('slow_file', stream.getvalue())
+        self.assertIn('累计读取', stream.getvalue())
 
     def test_new_subdirectory_blocks_loose_cleanup(self):
         self.put('a'); self.put('b'); p = c.plan(self.root)
