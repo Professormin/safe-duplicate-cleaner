@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import threading
+import time
 from pathlib import Path
 
 # 导入核心清理逻辑
@@ -26,8 +27,13 @@ class SafeCleanerGUI(tk.Tk):
         self.current_plan = None
         self.plan_root = None  # 记录计划对应的根路径
         self.is_running = False
+        self.running_task_type = None  # 'preview' 或 'apply'
+        self.worker_thread = None
+
+        self.protocol("WM_DELETE_WINDOW", self._on_closing)
 
         self._build_ui()
+        self._start_ui_poll()
 
     def _build_ui(self):
         # 顶部配置区域
@@ -85,6 +91,36 @@ class SafeCleanerGUI(tk.Tk):
         status_bar = ttk.Label(self, textvariable=self.status_var, relief="sunken", anchor="w", padding=5)
         status_bar.pack(fill="x", side="bottom")
 
+    def _start_ui_poll(self):
+        """定期从 cleaner.PROGRESS 读取实时状态并刷新至界面状态栏。"""
+        if self.is_running and cleaner.PROGRESS:
+            p = cleaner.PROGRESS
+            with p.lock:
+                elapsed = time.monotonic() - p.started
+                msg = (f"[{p.stage}] 已扫描 {p.scanned:,} 文件/{cleaner.readable_size(p.scanned_bytes)} | "
+                       f"已校验 {p.files:,} 文件 | 累计读取 {cleaner.readable_size(p.bytes)} | 用时 {elapsed:.0f}s")
+                if p.path:
+                    filename = Path(p.path).name
+                    msg += f" | 当前：{filename}"
+                    if p.size:
+                        msg += f"（{cleaner.readable_size(p.offset)}/{cleaner.readable_size(p.size)}）"
+            self.status_var.set(msg)
+        self.after(200, self._start_ui_poll)
+
+    def _on_closing(self):
+        """关闭窗口时的安全拦截。"""
+        if self.is_running:
+            if self.running_task_type == "apply":
+                messagebox.showwarning(
+                    "安全拦截", 
+                    "正在进行文件隔离操作！直接强行关闭可能导致某一项隔离日志写入不完整。\n\n请等待隔离操作完成后再关闭窗口。"
+                )
+                return
+            else:
+                if not messagebox.askyesno("确认退出", "后台正在进行扫描分析，确定要中断扫描并退出界面吗？"):
+                    return
+        self.destroy()
+
     def _on_path_change(self, *args):
         """当用户修改路径输入框时，清空旧计划并重置按钮状态，避免路径与计划不一致。"""
         if self.current_plan:
@@ -120,23 +156,39 @@ class SafeCleanerGUI(tk.Tk):
             return
 
         self.is_running = True
+        self.running_task_type = "preview"
         self.btn_preview.config(state="disabled")
         self.btn_apply.config(state="disabled")
         self.status_var.set("正在后台进行安全扫描与对比计算，请稍候...")
 
-        threading.Thread(target=self._worker_preview, args=(root_path, out_path), daemon=True).start()
+        self.worker_thread = threading.Thread(target=self._worker_preview, args=(root_path, out_path), daemon=True)
+        self.worker_thread.start()
 
     def _worker_preview(self, root_path, out_path):
         try:
-            plan = cleaner.plan(root_path)
-            report_file = cleaner.execute(plan, out_path, apply=False)
+            with cleaner.Progress():
+                plan = cleaner.plan(root_path)
+                report_file = cleaner.execute(plan, out_path, apply=False)
             self.after(0, self._on_preview_success, plan, root_path, report_file)
         except Exception as e:
             self.after(0, self._on_preview_error, str(e))
 
     def _on_preview_success(self, plan, root_path, report_file):
         self.is_running = False
+        self.running_task_type = None
         self.btn_preview.config(state="normal")
+
+        # 检查如果在扫描期间，用户修改了输入的路径，则直接丢弃过期的扫描结果！
+        current_input_root = self.scan_root.get().strip()
+        try:
+            is_same = (Path(current_input_root).resolve() == Path(root_path).resolve())
+        except Exception:
+            is_same = False
+
+        if not is_same:
+            self.status_var.set("上一次后台扫描完成，但因扫描路径已被更换，旧扫描结果已安全丢弃。")
+            return
+
         self.current_plan = plan
         self.plan_root = root_path
 
@@ -158,6 +210,7 @@ class SafeCleanerGUI(tk.Tk):
 
     def _on_preview_error(self, err_msg):
         self.is_running = False
+        self.running_task_type = None
         self.btn_preview.config(state="normal")
         self.status_var.set("扫描失败。")
         messagebox.showerror("错误", f"扫描过程中出错：\n{err_msg}")
@@ -178,15 +231,18 @@ class SafeCleanerGUI(tk.Tk):
 
         out_path = self.report_output.get().strip()
         self.is_running = True
+        self.running_task_type = "apply"
         self.btn_preview.config(state="disabled")
         self.btn_apply.config(state="disabled")
         self.status_var.set("正在安全隔离中，请稍候...")
 
-        threading.Thread(target=self._worker_apply, args=(out_path,), daemon=True).start()
+        self.worker_thread = threading.Thread(target=self._worker_apply, args=(out_path,), daemon=True)
+        self.worker_thread.start()
 
     def _worker_apply(self, out_path):
         try:
-            report_file = cleaner.execute(self.current_plan, out_path, apply=True)
+            with cleaner.Progress():
+                report_file = cleaner.execute(self.current_plan, out_path, apply=True)
             report_data = json.loads(Path(report_file).read_text(encoding="utf-8"))
             self.after(0, self._on_apply_success, report_file, report_data)
         except Exception as e:
@@ -194,6 +250,7 @@ class SafeCleanerGUI(tk.Tk):
 
     def _on_apply_success(self, report_file, report_data):
         self.is_running = False
+        self.running_task_type = None
         self.btn_preview.config(state="normal")
         
         stats = report_data.get("statistics", {})
@@ -214,6 +271,7 @@ class SafeCleanerGUI(tk.Tk):
 
     def _on_apply_error(self, err_msg):
         self.is_running = False
+        self.running_task_type = None
         self.btn_preview.config(state="normal")
         self.status_var.set("隔离操作已中断。")
         messagebox.showerror("错误", f"执行隔离时出错：\n{err_msg}")
