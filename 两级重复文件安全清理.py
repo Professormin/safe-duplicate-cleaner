@@ -339,14 +339,20 @@ def plan(root, db=None):
             groups[content(sub)].append(name)
     jobs, protected = [], set()
     for group in groups.values():
-        if len(group) < 2 or any(under(n, p) for n in group for p in protected):
+        if len(group) < 2:
             continue
         group.sort(key=order)
-        keeper = group[0]
+        # 挑选最外层的目录作为 keeper，并排除其子目录
+        keepers = [g for g in group if not any(under(g, p) for p in protected)]
+        if not keepers:
+            continue
+        keeper = keepers[0]
+        # 保护本组所有的完整副本及其所有子路径，防止内层或嵌套重复被再次处理
         protected.update(group)
-        for source in group[1:]:
-            jobs.append({'kind': 'folder', 'source': source, 'keeper': keeper,
-                         'expected': subtree(tree, source), 'keep_expected': subtree(tree, keeper)})
+        for source in group:
+            if source != keeper and not any(under(source, p) for p in protected - set(group)):
+                jobs.append({'kind': 'folder', 'source': source, 'keeper': keeper,
+                             'expected': subtree(tree, source), 'keep_expected': subtree(tree, keeper)})
 
     if PROGRESS:
         PROGRESS.phase('4/4 检查叶子目录零散文件')
@@ -547,7 +553,9 @@ def main():
     output = args.output if args.output is not None else root / REPORTS
     apply = args.apply or (len(sys.argv) == 1 and MOVE_DUPLICATES)
     
-    db_path = output / 'cleaner_vault.db'
+    # 数据库固定存放在专用的 _重复文件报告 目录中（即使指定了其他自定义报告输出目录），确保已被 scan() 自动排除隔离
+    db_dir = root / REPORTS if (output == root or root in output.parents) else output
+    db_path = db_dir / 'cleaner_vault.db'
     db = VaultDB(db_path)
 
     try:
